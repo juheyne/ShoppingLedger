@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"bytes"
 	"strconv"
+	"fmt"
+	"time"
 )
 
 var a main.App
@@ -25,11 +27,19 @@ func TestMain(m *testing.M) {
 
 	clearTable()
 
+	// Close DB and remove the sqlite db
+	a.DB.Close()
+	err := os.Remove("./test.db")
+	if err != nil {
+		fmt.Println("Could not remove test sqlite db due to: ", err)
+	}
+
 	os.Exit(code)
 }
 
 func ensureTableExists() {
-	if _, err := a.DB.Exec(tableCreationQuery); err != nil {
+	var name string
+	if err := a.DB.QueryRow("SELECT name FROM sqlite_master WHERE name='expenses'").Scan(&name); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -55,7 +65,7 @@ func TestEmptyTable(t *testing.T) {
 func TestCreateProduct(t *testing.T) {
 	clearTable()
 
-	payload := []byte(`{"payer":1,"amount":53.12,"note":"Groceries"}`)
+	payload := []byte(`{"payer":"Payer","amount":53.12,"note":"Groceries","date":"2018-01-13T20:47:48+01:00"}`)
 
 	req, _ := http.NewRequest("POST", "/expense", bytes.NewBuffer(payload))
 	response := executeRequest(req)
@@ -65,20 +75,24 @@ func TestCreateProduct(t *testing.T) {
 	var m map[string]interface{}
 	json.Unmarshal(response.Body.Bytes(), &m)
 
-	if m["payer"] != 1.0 {
-		t.Errorf("Expected payer to have id '1'. Got %v with type %T", m["payer"], m["payer"])
+	if m["payer"] != "Payer" {
+		t.Errorf("Expected payer to be 'Payer'. Got '%v'", m["payer"])
 	}
 
 	if m["amount"] != 53.12 {
-		t.Errorf("Expected amount to be '53.12'. Got %v", m["amount"])
+		t.Errorf("Expected amount to be '53.12'. Got '%v'", m["amount"])
 	}
 
 	if m["note"] != "Groceries" {
-		t.Errorf("Expected note to be 'Groceries'. Got %v", m["note"])
+		t.Errorf("Expected note to be 'Groceries'. Got '%v'", m["note"])
+	}
+
+	if m["date"] != "2018-01-13T20:47:48+01:00" {
+		t.Errorf("Expected time to be '2018-01-13T20:47:48+01:00'. Got '%v'", m["date"])
 	}
 
 	if m["id"] != 1.0 {
-		t.Errorf("Expected expense ID to be '1'. Got %v", m["id"])
+		t.Errorf("Expected expense ID to be '1'. Got '%v'", m["id"])
 	}
 }
 
@@ -101,7 +115,7 @@ func TestUpdateExpense(t *testing.T) {
 	var originalExpense map[string]interface{}
 	json.Unmarshal(response.Body.Bytes(), &originalExpense)
 
-	payload := []byte(`{"payer":2,"amount":53.12,"note":"Updated note"}`)
+	payload := []byte(`{"payer":"New Guy","amount":53.12,"note":"Updated note","date":"2018-01-13T20:47:48+01:00"}`)
 
 	req, _ = http.NewRequest("PUT", "/expense/1", bytes.NewBuffer(payload))
 	response = executeRequest(req)
@@ -116,7 +130,7 @@ func TestUpdateExpense(t *testing.T) {
 	}
 
 	if m["payer"] == originalExpense["payer"] {
-		t.Errorf("Expected the payer to change from '%v' to '2'. Got %v", originalExpense["payer"], m["payer"])
+		t.Errorf("Expected the payer to change from '%v' to 'New Guy'. Got %v", originalExpense["payer"], m["payer"])
 	}
 
 	if m["amount"] == originalExpense["amount"] {
@@ -124,7 +138,11 @@ func TestUpdateExpense(t *testing.T) {
 	}
 
 	if m["note"] == originalExpense["note"] {
-		t.Errorf("Expected the note to change from '%v' to 'Updated note'. Got %v", originalExpense["note"], m["note"])
+		t.Errorf("Expected the note to change from '%v' to 'Updated note'. Got '%v'", originalExpense["note"], m["note"])
+	}
+
+	if m["date"] == originalExpense["time"] {
+		t.Errorf("Expected date to change from '%v' to '2018-01-13T20:47:48+01:00'. Got '%v'", originalExpense["date"], m["date"])
 	}
 }
 
@@ -152,7 +170,7 @@ func addExpenses(n int) {
 	}
 
 	for i := 0; i < n; i++ {
-		a.DB.Exec("INSERT INTO expenses(payer, amount, note) VALUES(?, ?, ?)", i, (i+1.0)*10.0, strconv.Itoa(i))
+		a.DB.Exec("INSERT INTO expenses(payer, amount, note, date) VALUES(?, ?, ?, ?)", fmt.Sprint("Payer ", i), (i+1.0)*10.0, strconv.Itoa(i), time.Now().Format(time.RFC3339))
 	}
 }
 
@@ -168,12 +186,3 @@ func executeRequest(req *http.Request) *httptest.ResponseRecorder {
 
 	return rr
 }
-
-const tableCreationQuery = `CREATE TABLE IF NOT EXISTS expenses
-(
-id INTEGER NOT NULL PRIMARY KEY,
-payer INTEGER NOT NULL,
-amount REAL NOT NULL,
-note TEXT NOT NULL DEFAULT '' 
-)`
-

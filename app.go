@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strconv"
 	"encoding/json"
+
+	"github.com/juheyne/ShoppingLedger/model"
 )
 
 type App struct {
@@ -17,11 +19,7 @@ type App struct {
 }
 
 func (a *App) Initialize(path string) {
-	var err error
-	a.DB, err = sql.Open("sqlite3", "./test.db")
-	if err != nil {
-		log.Fatal(err)
-	}
+	a.DB = model.Open(path)
 
 	a.Router = httprouter.New()
 	a.initializeRoutes()
@@ -55,7 +53,7 @@ func (a *App) getExpenses(w http.ResponseWriter, r *http.Request, _ httprouter.P
 		start = 0
 	}
 
-	expenses, err := getExpenses(a.DB, start, count)
+	expenses, err := model.GetExpenses(a.DB, start, count)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -71,12 +69,13 @@ func (a *App) getExpense(w http.ResponseWriter, r *http.Request, ps httprouter.P
 		return
 	}
 
-	e := expense{ID: id}
-	if err := e.getExpense(a.DB); err != nil {
+	e := model.Expense{ID: id}
+	if err := e.Get(a.DB); err != nil {
 		switch err {
 		case sql.ErrNoRows:
 			respondWithError(w, http.StatusNotFound, "Expense not found")
 		default:
+			fmt.Println(err)
 			respondWithError(w, http.StatusInternalServerError, err.Error())
 		}
 		return
@@ -86,15 +85,16 @@ func (a *App) getExpense(w http.ResponseWriter, r *http.Request, ps httprouter.P
 }
 
 func (a *App) createExpense(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-	var e expense
+	var e model.Expense
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&e); err != nil {
+		fmt.Println("CreateExpense Decode Error: ", err)
 		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
 		return
 	}
 	defer r.Body.Close()
 
-	if err := e.createProduct(a.DB); err != nil {
+	if err := e.Create(a.DB); err != nil {
 		respondWithError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -109,7 +109,7 @@ func (a *App) updateExpense(w http.ResponseWriter, r *http.Request, ps httproute
 		return
 	}
 
-	var e expense
+	var e model.Expense
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&e); err != nil {
 		respondWithError(w, http.StatusBadRequest, "Invalid request payload")
@@ -118,7 +118,7 @@ func (a *App) updateExpense(w http.ResponseWriter, r *http.Request, ps httproute
 	defer r.Body.Close()
 	e.ID = id
 
-	if err := e.updateExpense(a.DB); err != nil {
+	if err := e.Update(a.DB); err != nil {
 		respondWithError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -133,8 +133,8 @@ func (a *App) deleteExpense(w http.ResponseWriter, r *http.Request, ps httproute
 		return
 	}
 
-	e := expense{ID: id}
-	if err := e.deleteExpense(a.DB); err != nil {
+	e := model.Expense{ID: id}
+	if err := e.Delete(a.DB); err != nil {
 		respondWithError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
